@@ -71,7 +71,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .crosshair)
         if isOCRToolSelected, !selection.isEmpty {
-            addCursorRect(selection, cursor: .iBeam)
+            addCursorRect(selection, cursor: .crosshair)
         }
     }
 
