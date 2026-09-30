@@ -11,14 +11,6 @@ final class ScreenshotController {
     private init() {}
 
     func startCapture() {
-        startCapture(mode: .screenshot)
-    }
-
-    func startTextCapture() {
-        startCapture(mode: .textRecognition)
-    }
-
-    private func startCapture(mode: CaptureMode) {
         NSLog("KShot 收到截图请求")
         guard !isCapturing else { return }
 
@@ -43,7 +35,7 @@ final class ScreenshotController {
         isCapturing = true
         NSApp.activate(ignoringOtherApps: true)
         overlays = captures.map { screen, image in
-            let window = CaptureWindow(screen: screen, image: image, mode: mode)
+            let window = CaptureWindow(screen: screen, image: image)
             window.captureDidBegin = { [weak self, weak window] in
                 guard let self, let activeWindow = window else { return }
                 self.overlays.filter { $0 !== activeWindow }.forEach { $0.orderOut(nil) }
@@ -117,11 +109,6 @@ final class ScreenshotController {
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
-}
-
-enum CaptureMode: Equatable {
-    case screenshot
-    case textRecognition
 }
 
 enum CaptureResult {

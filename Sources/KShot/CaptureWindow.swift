@@ -6,8 +6,8 @@ final class CaptureWindow: NSWindow {
 
     private let captureView: CaptureView
 
-    init(screen: NSScreen, image: CGImage, mode: CaptureMode) {
-        captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image, mode: mode)
+    init(screen: NSScreen, image: CGImage) {
+        captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image)
         super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         isReleasedWhenClosed = false
         level = .screenSaver
@@ -24,7 +24,7 @@ final class CaptureWindow: NSWindow {
 }
 
 private enum Interaction {
-    case idle, selecting, drawing
+    case idle, selecting, drawing, recognizingText
     case moving(origin: CGRect)
     case resizing(handle: ResizeHandle, origin: CGRect)
 }
@@ -37,12 +37,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private let sourceImage: NSImage
     private let pixelatedImage: NSImage
-    private let mode: CaptureMode
     private var selection: CGRect = .zero
     private var interaction: Interaction = .idle
     private var dragStart: CGPoint = .zero
     private var currentPoint: CGPoint = .zero
     private var selectedTool: AnnotationTool?
+    private var isOCRToolSelected = false
+    private var ocrSelection: CGRect = .zero
     private var annotations: [Annotation] = []
     private var draftMosaic: [CGPoint] = []
     private var textEditor: NSTextField?
@@ -52,10 +53,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private let buttonSpacing: CGFloat = 6
     private let toolbarPadding: CGFloat = 7
 
-    init(frame: CGRect, image: CGImage, mode: CaptureMode) {
+    init(frame: CGRect, image: CGImage) {
         sourceImage = NSImage(cgImage: image, size: frame.size)
         pixelatedImage = CaptureView.makePixelatedImage(from: image, displaySize: frame.size)
-        self.mode = mode
         super.init(frame: frame)
         wantsLayer = true
     }
@@ -68,7 +68,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(self)
     }
 
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+        if isOCRToolSelected, !selection.isEmpty {
+            addCursorRect(selection, cursor: .iBeam)
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -82,17 +87,19 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         drawScreenImage(sourceImage)
         drawAnnotations()
         drawDraft()
+        drawOCRSelection()
         NSGraphicsContext.restoreGraphicsState()
         drawSelectionChrome()
         drawDimensionLabel()
         if case .selecting = interaction { return }
         drawToolbar()
+        if isOCRToolSelected { drawOCRHint() }
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         window?.makeFirstResponder(self)
-        if event.clickCount == 2, selection.contains(point), selectedTool != .text { completeCapture(); return }
+        if event.clickCount == 2, selection.contains(point), selectedTool != .text, !isOCRToolSelected { completeCapture(); return }
         if !selection.isEmpty, toolbarRect.contains(point) { handleToolbarClick(at: point); return }
         announceCaptureIfNeeded()
         dragStart = point
@@ -100,6 +107,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
         if !selection.isEmpty, let handle = resizeHandle(at: point) {
             interaction = .resizing(handle: handle, origin: selection)
+        } else if !selection.isEmpty, selection.contains(point), isOCRToolSelected {
+            ocrSelection = .zero
+            interaction = .recognizingText
         } else if !selection.isEmpty, selection.contains(point), let selectedTool {
             switch selectedTool {
             case .text: beginTextEditing(at: point); interaction = .idle
@@ -133,6 +143,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             selection = resizedRect(origin, handle: handle, to: point).intersection(bounds)
         case .drawing:
             if selectedTool == .mosaic { draftMosaic.append(clamped(point)) }
+        case .recognizingText:
+            ocrSelection = CGRect(from: dragStart, to: clamped(point)).intersection(selection)
         case .idle: break
         }
         needsDisplay = true
@@ -140,24 +152,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     override func mouseUp(with event: NSEvent) {
         currentPoint = convert(event.locationInWindow, from: nil)
-        let shouldAutoRecognize: Bool
-        if case .selecting = interaction {
-            shouldAutoRecognize = mode == .textRecognition
-        } else {
-            shouldAutoRecognize = false
-        }
+        var recognizedRect: CGRect?
         switch interaction {
         case .selecting, .moving, .resizing:
             selection = selection.standardized.integral
             if selection.width < 3 || selection.height < 3 { selection = .zero }
         case .drawing: commitDraftAnnotation()
+        case .recognizingText:
+            ocrSelection = ocrSelection.standardized.integral.intersection(selection)
+            if ocrSelection.width >= 3, ocrSelection.height >= 3 { recognizedRect = ocrSelection }
         case .idle: break
         }
         interaction = .idle
         needsDisplay = true
-        if shouldAutoRecognize, selection.width >= 3, selection.height >= 3 {
-            recognizeText()
-        }
+        if let recognizedRect { recognizeText(in: recognizedRect) }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -179,10 +187,19 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func handleToolbarClick(at point: CGPoint) {
         for tool in AnnotationTool.allCases where toolButtonRect(tool).contains(point) {
             selectedTool = selectedTool == tool ? nil : tool
+            isOCRToolSelected = false
+            ocrSelection = .zero
+            window?.invalidateCursorRects(for: self)
             needsDisplay = true
             return
         }
-        if ocrButtonRect.contains(point) { recognizeText() }
+        if ocrButtonRect.contains(point) {
+            isOCRToolSelected.toggle()
+            selectedTool = nil
+            ocrSelection = .zero
+            window?.invalidateCursorRects(for: self)
+            needsDisplay = true
+        }
         else if cancelButtonRect.contains(point) { finish(.cancelled) }
         else if doneButtonRect.contains(point) { completeCapture() }
     }
@@ -193,10 +210,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         finish(.completed(image))
     }
 
-    private func recognizeText() {
+    private func recognizeText(in rect: CGRect) {
         commitTextEditor()
-        guard selection.width >= 3, selection.height >= 3,
-              let image = renderSelection(includeAnnotations: false) else { return }
+        guard rect.width >= 3, rect.height >= 3,
+              let image = render(rect: rect, includeAnnotations: false) else { return }
         finish(.recognizeText(image))
     }
 
@@ -278,9 +295,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func drawHint() {
-        let text = mode == .textRecognition
-            ? "拖过文字，松手识别并复制  ·  Esc 取消"
-            : "拖动鼠标选择区域  ·  Esc 取消"
+        let text = "拖动鼠标选择区域  ·  Esc 取消"
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         let rect = CGRect(x: bounds.midX - size.width / 2 - 14, y: 30, width: size.width + 28, height: 36)
@@ -321,7 +336,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
         for tool in AnnotationTool.allCases { drawButton(rect: toolButtonRect(tool), symbol: tool.symbolName, selected: tool == selectedTool) }
-        drawButton(rect: ocrButtonRect, symbol: "text.viewfinder", color: .systemBlue)
+        drawButton(rect: ocrButtonRect, symbol: "text.viewfinder", selected: isOCRToolSelected, color: .systemBlue)
         drawButton(rect: cancelButtonRect, symbol: "xmark", color: .secondaryLabelColor)
         drawButton(rect: doneButtonRect, symbol: "checkmark", color: .systemGreen)
     }
@@ -367,6 +382,34 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
     }
 
+    private func drawOCRSelection() {
+        guard !ocrSelection.isEmpty else { return }
+        NSColor.systemBlue.withAlphaComponent(0.2).setFill()
+        NSBezierPath(roundedRect: ocrSelection, xRadius: 3, yRadius: 3).fill()
+        NSColor.systemBlue.setStroke()
+        let border = NSBezierPath(roundedRect: ocrSelection.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        border.lineWidth = 2
+        border.stroke()
+    }
+
+    private func drawOCRHint() {
+        let text = "在截图内拖过文字，松手复制"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white
+        ]
+        let size = text.size(withAttributes: attrs)
+        let width = size.width + 16
+        let x = min(max(8, selection.minX), bounds.width - width - 8)
+        let toolbarAboveSelection = toolbarRect.maxY <= selection.maxY
+        let preferredY = toolbarAboveSelection ? toolbarRect.minY - 28 : toolbarRect.maxY + 6
+        let y = min(max(8, preferredY), bounds.height - 28)
+        let rect = CGRect(x: x, y: y, width: width, height: 24)
+        NSColor.systemBlue.withAlphaComponent(0.92).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+        text.draw(at: CGPoint(x: rect.minX + 8, y: rect.minY + 5), withAttributes: attrs)
+    }
+
     private func drawAnnotation(_ annotation: Annotation) {
         switch annotation {
         case let .rectangle(rect):
@@ -396,16 +439,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func renderSelection(includeAnnotations: Bool) -> NSImage? {
+        render(rect: selection, includeAnnotations: includeAnnotations)
+    }
+
+    private func render(rect: CGRect, includeAnnotations: Bool) -> NSImage? {
         let scaleX = CGFloat(sourceImage.representations.first?.pixelsWide ?? Int(bounds.width)) / bounds.width
         let scaleY = CGFloat(sourceImage.representations.first?.pixelsHigh ?? Int(bounds.height)) / bounds.height
-        let pixelWidth = max(1, Int((selection.width * scaleX).rounded())), pixelHeight = max(1, Int((selection.height * scaleY).rounded()))
+        let pixelWidth = max(1, Int((rect.width * scaleX).rounded())), pixelHeight = max(1, Int((rect.height * scaleY).rounded()))
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixelWidth, pixelsHigh: pixelHeight, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
               let bitmapData = rep.bitmapData,
               let cgContext = CGContext(data: bitmapData, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: rep.bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        rep.size = selection.size
+        rep.size = rect.size
         cgContext.translateBy(x: 0, y: CGFloat(pixelHeight))
         cgContext.scaleBy(x: scaleX, y: -scaleY)
-        cgContext.translateBy(x: -selection.minX, y: -selection.minY)
+        cgContext.translateBy(x: -rect.minX, y: -rect.minY)
         let context = NSGraphicsContext(cgContext: cgContext, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
@@ -413,7 +460,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         drawScreenImage(sourceImage)
         if includeAnnotations { drawAnnotations() }
         NSGraphicsContext.restoreGraphicsState()
-        let result = NSImage(size: selection.size); result.addRepresentation(rep); return result
+        let result = NSImage(size: rect.size); result.addRepresentation(rep); return result
     }
 
     private func drawScreenImage(_ image: NSImage, interpolation: NSImageInterpolation = .high) {
