@@ -58,6 +58,21 @@ final class ScreenshotController {
         if case let .completed(image) = result {
             copyToPasteboard(image)
             NSSound(named: "Tink")?.play()
+        } else if case let .recognizeText(image) = result {
+            Task { await recognizeText(in: image) }
+        }
+    }
+
+    private func recognizeText(in image: NSImage) async {
+        do {
+            let text = try await ZhipuOCRService().recognize(image)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            NSSound(named: "Glass")?.play()
+            showOCRResult(text)
+        } catch {
+            showOCRError(error.localizedDescription)
         }
     }
 
@@ -85,9 +100,29 @@ final class ScreenshotController {
         alert.informativeText = "请检查屏幕录制权限后重试。"
         alert.runModal()
     }
+
+    private func showOCRResult(_ text: String) {
+        let alert = NSAlert()
+        alert.messageText = "文字识别完成"
+        alert.informativeText = "已识别 \(text.count) 个字符，并复制到剪贴板。"
+        alert.addButton(withTitle: "好")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showOCRError(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "文字识别失败"
+        alert.informativeText = message
+        alert.addButton(withTitle: "好")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
 }
 
 enum CaptureResult {
     case completed(NSImage)
+    case recognizeText(NSImage)
     case cancelled
 }

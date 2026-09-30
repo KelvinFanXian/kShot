@@ -10,7 +10,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "KShot",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.linkedFramework("Security")]
         ),
         .testTarget(
             name: "KShotTests",

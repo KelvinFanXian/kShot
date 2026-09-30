@@ -13,4 +13,9 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(rect.point(for: .bottomRight), CGPoint(x: 110, y: 80))
         XCTAssertEqual(rect.point(for: .right), CGPoint(x: 110, y: 50))
     }
+
+    func testOCRResponseRemovesMarkdownFence() {
+        XCTAssertEqual(ZhipuOCRService.cleaned("```text\n第一行\n第二行\n```"), "第一行\n第二行")
+        XCTAssertEqual(ZhipuOCRService.cleaned("  普通文本  "), "普通文本")
+    }
 }

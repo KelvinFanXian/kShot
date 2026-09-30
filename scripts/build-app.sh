@@ -13,5 +13,17 @@ CONTENTS_DIR="$APP_DIR/Contents"
 mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 cp "$ROOT_DIR/.build/release/KShot" "$CONTENTS_DIR/MacOS/KShot"
 cp "$ROOT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
-codesign --force --deep --sign - "$APP_DIR"
+
+KSHOT_SIGNING_IDENTITY="${KSHOT_SIGNING_IDENTITY:-}"
+if [[ -z "$KSHOT_SIGNING_IDENTITY" ]]; then
+    KSHOT_SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' \
+        | head -n 1)"
+fi
+if [[ -z "$KSHOT_SIGNING_IDENTITY" ]]; then
+    KSHOT_SIGNING_IDENTITY="-"
+fi
+
+codesign --force --deep --sign "$KSHOT_SIGNING_IDENTITY" "$APP_DIR"
+echo "签名：$KSHOT_SIGNING_IDENTITY"
 echo "$APP_DIR"

@@ -169,14 +169,22 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             needsDisplay = true
             return
         }
-        if cancelButtonRect.contains(point) { completion?(.cancelled) }
+        if ocrButtonRect.contains(point) { recognizeText() }
+        else if cancelButtonRect.contains(point) { completion?(.cancelled) }
         else if doneButtonRect.contains(point) { completeCapture() }
     }
 
     private func completeCapture() {
         commitTextEditor()
-        guard selection.width >= 3, selection.height >= 3, let image = renderSelection() else { return }
+        guard selection.width >= 3, selection.height >= 3, let image = renderSelection(includeAnnotations: true) else { return }
         completion?(.completed(image))
+    }
+
+    private func recognizeText() {
+        commitTextEditor()
+        guard selection.width >= 3, selection.height >= 3,
+              let image = renderSelection(includeAnnotations: false) else { return }
+        completion?(.recognizeText(image))
     }
 
     private func commitDraftAnnotation() {
@@ -290,6 +298,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
         for tool in AnnotationTool.allCases { drawButton(rect: toolButtonRect(tool), symbol: tool.symbolName, selected: tool == selectedTool) }
+        drawButton(rect: ocrButtonRect, symbol: "text.viewfinder", color: .systemBlue)
         drawButton(rect: cancelButtonRect, symbol: "xmark", color: .secondaryLabelColor)
         drawButton(rect: doneButtonRect, symbol: "checkmark", color: .systemGreen)
     }
@@ -306,7 +315,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private var toolbarRect: CGRect {
-        let count = CGFloat(AnnotationTool.allCases.count + 2)
+        let count = CGFloat(AnnotationTool.allCases.count + 3)
         let width = toolbarPadding * 2 + count * buttonSize + (count - 1) * buttonSpacing
         var x = min(max(8, selection.maxX - width), bounds.width - width - 8)
         if bounds.width < width + 16 { x = 0 }
@@ -316,8 +325,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func toolButtonRect(_ tool: AnnotationTool) -> CGRect { buttonRect(index: AnnotationTool.allCases.firstIndex(of: tool) ?? 0) }
-    private var cancelButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count) }
-    private var doneButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count + 1) }
+    private var ocrButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count) }
+    private var cancelButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count + 1) }
+    private var doneButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count + 2) }
     private func buttonRect(index: Int) -> CGRect {
         CGRect(x: toolbarRect.minX + toolbarPadding + CGFloat(index) * (buttonSize + buttonSpacing), y: toolbarRect.minY + toolbarPadding, width: buttonSize, height: buttonSize)
     }
@@ -362,7 +372,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSColor.systemRed.setStroke(); path.stroke()
     }
 
-    private func renderSelection() -> NSImage? {
+    private func renderSelection(includeAnnotations: Bool) -> NSImage? {
         let scaleX = CGFloat(sourceImage.representations.first?.pixelsWide ?? Int(bounds.width)) / bounds.width
         let scaleY = CGFloat(sourceImage.representations.first?.pixelsHigh ?? Int(bounds.height)) / bounds.height
         let pixelWidth = max(1, Int((selection.width * scaleX).rounded())), pixelHeight = max(1, Int((selection.height * scaleY).rounded()))
@@ -378,7 +388,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSGraphicsContext.current = context
         context.imageInterpolation = .high
         drawScreenImage(sourceImage)
-        drawAnnotations()
+        if includeAnnotations { drawAnnotations() }
         NSGraphicsContext.restoreGraphicsState()
         let result = NSImage(size: selection.size); result.addRepresentation(rep); return result
     }
