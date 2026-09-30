@@ -6,9 +6,10 @@ final class CaptureWindow: NSWindow {
 
     private let captureView: CaptureView
 
-    init(screen: NSScreen, image: CGImage) {
-        captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image)
+    init(screen: NSScreen, image: CGImage, mode: CaptureMode) {
+        captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image, mode: mode)
         super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        isReleasedWhenClosed = false
         level = .screenSaver
         backgroundColor = .clear
         isOpaque = true
@@ -36,6 +37,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private let sourceImage: NSImage
     private let pixelatedImage: NSImage
+    private let mode: CaptureMode
     private var selection: CGRect = .zero
     private var interaction: Interaction = .idle
     private var dragStart: CGPoint = .zero
@@ -45,13 +47,15 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var draftMosaic: [CGPoint] = []
     private var textEditor: NSTextField?
     private var hasAnnouncedCapture = false
+    private var isFinishing = false
     private let buttonSize: CGFloat = 34
     private let buttonSpacing: CGFloat = 6
     private let toolbarPadding: CGFloat = 7
 
-    init(frame: CGRect, image: CGImage) {
+    init(frame: CGRect, image: CGImage, mode: CaptureMode) {
         sourceImage = NSImage(cgImage: image, size: frame.size)
         pixelatedImage = CaptureView.makePixelatedImage(from: image, displaySize: frame.size)
+        self.mode = mode
         super.init(frame: frame)
         wantsLayer = true
     }
@@ -136,6 +140,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     override func mouseUp(with event: NSEvent) {
         currentPoint = convert(event.locationInWindow, from: nil)
+        let shouldAutoRecognize: Bool
+        if case .selecting = interaction {
+            shouldAutoRecognize = mode == .textRecognition
+        } else {
+            shouldAutoRecognize = false
+        }
         switch interaction {
         case .selecting, .moving, .resizing:
             selection = selection.standardized.integral
@@ -145,11 +155,14 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
         interaction = .idle
         needsDisplay = true
+        if shouldAutoRecognize, selection.width >= 3, selection.height >= 3 {
+            recognizeText()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
-        case 53: completion?(.cancelled)
+        case 53: finish(.cancelled)
         case 36, 76: completeCapture()
         case 51:
             if !annotations.isEmpty { annotations.removeLast(); needsDisplay = true }
@@ -170,21 +183,29 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             return
         }
         if ocrButtonRect.contains(point) { recognizeText() }
-        else if cancelButtonRect.contains(point) { completion?(.cancelled) }
+        else if cancelButtonRect.contains(point) { finish(.cancelled) }
         else if doneButtonRect.contains(point) { completeCapture() }
     }
 
     private func completeCapture() {
         commitTextEditor()
         guard selection.width >= 3, selection.height >= 3, let image = renderSelection(includeAnnotations: true) else { return }
-        completion?(.completed(image))
+        finish(.completed(image))
     }
 
     private func recognizeText() {
         commitTextEditor()
         guard selection.width >= 3, selection.height >= 3,
               let image = renderSelection(includeAnnotations: false) else { return }
-        completion?(.recognizeText(image))
+        finish(.recognizeText(image))
+    }
+
+    private func finish(_ result: CaptureResult) {
+        guard !isFinishing else { return }
+        isFinishing = true
+        DispatchQueue.main.async { [weak self] in
+            self?.completion?(result)
+        }
     }
 
     private func commitDraftAnnotation() {
@@ -257,7 +278,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func drawHint() {
-        let text = "拖动鼠标选择区域  ·  Esc 取消"
+        let text = mode == .textRecognition
+            ? "拖过文字，松手识别并复制  ·  Esc 取消"
+            : "拖动鼠标选择区域  ·  Esc 取消"
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         let rect = CGRect(x: bounds.midX - size.width / 2 - 14, y: 30, width: size.width + 28, height: 36)

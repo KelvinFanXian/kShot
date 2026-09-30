@@ -1,11 +1,12 @@
 import AppKit
+import Carbon.HIToolbox
 
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let retainedDelegate = AppDelegate()
     private var statusItem: NSStatusItem?
-    private var hotKeyManager: HotKeyManager?
+    private var hotKeyManagers: [HotKeyManager] = []
 
     static func main() {
         let application = NSApplication.shared
@@ -16,11 +17,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
-        hotKeyManager = HotKeyManager {
-            ScreenshotController.shared.startCapture()
-        }
-        NSLog("KShot 已启动，快捷键注册状态：%@", hotKeyManager?.isRegistered == true ? "成功" : "失败")
-        if CommandLine.arguments.contains("--capture-on-launch") {
+        hotKeyManagers = [
+            HotKeyManager(keyCode: UInt32(kVK_ANSI_A), identifierID: 1) {
+                ScreenshotController.shared.startCapture()
+            },
+            HotKeyManager(keyCode: UInt32(kVK_ANSI_X), identifierID: 2) {
+                ScreenshotController.shared.startTextCapture()
+            }
+        ]
+        NSLog("KShot 已启动，快捷键注册状态：%@", hotKeyManagers.allSatisfy(\.isRegistered) ? "成功" : "失败")
+        if CommandLine.arguments.contains("--text-capture-on-launch") {
+            DispatchQueue.main.async {
+                ScreenshotController.shared.startTextCapture()
+            }
+        } else if CommandLine.arguments.contains("--capture-on-launch") {
             DispatchQueue.main.async {
                 ScreenshotController.shared.startCapture()
             }
@@ -36,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let captureItem = NSMenuItem(title: "截图  ⌃⌘A", action: #selector(startCapture), keyEquivalent: "")
         captureItem.target = self
         menu.addItem(captureItem)
+
+        let textCaptureItem = NSMenuItem(title: "划词识别  ⌃⌘X", action: #selector(startTextCapture), keyEquivalent: "")
+        textCaptureItem.target = self
+        menu.addItem(textCaptureItem)
         menu.addItem(.separator())
 
         let aboutItem = NSMenuItem(title: "关于 KShot", action: #selector(showAbout), keyEquivalent: "")
@@ -57,10 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScreenshotController.shared.startCapture()
     }
 
+    @objc private func startTextCapture() {
+        ScreenshotController.shared.startTextCapture()
+    }
+
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "KShot",
-            .applicationVersion: "0.2.0",
+            .applicationVersion: "0.2.1",
             .credits: NSAttributedString(string: "作者：范显")
         ])
         NSApp.activate(ignoringOtherApps: true)

@@ -18,7 +18,7 @@ enum ZhipuOCRError: LocalizedError {
 }
 
 struct ZhipuOCRService {
-    private let endpoint = URL(string: "https://open.bigmodel.cn/api/paas/v4/chat/completions")!
+    static let endpoint = URL(string: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions")!
 
     func recognize(_ image: NSImage) async throws -> String {
         guard let apiKey = APIKeyStore.shared.load() else { throw ZhipuOCRError.missingAPIKey }
@@ -50,7 +50,7 @@ struct ZhipuOCRService {
             "max_tokens": 131_072
         ]
 
-        var request = URLRequest(url: endpoint)
+        var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

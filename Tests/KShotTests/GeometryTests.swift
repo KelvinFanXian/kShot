@@ -18,4 +18,11 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(ZhipuOCRService.cleaned("```text\n第一行\n第二行\n```"), "第一行\n第二行")
         XCTAssertEqual(ZhipuOCRService.cleaned("  普通文本  "), "普通文本")
     }
+
+    func testOCRUsesCodingPlanEndpoint() {
+        XCTAssertEqual(
+            ZhipuOCRService.endpoint.absoluteString,
+            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+        )
+    }
 }

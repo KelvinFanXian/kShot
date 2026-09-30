@@ -11,6 +11,14 @@ final class ScreenshotController {
     private init() {}
 
     func startCapture() {
+        startCapture(mode: .screenshot)
+    }
+
+    func startTextCapture() {
+        startCapture(mode: .textRecognition)
+    }
+
+    private func startCapture(mode: CaptureMode) {
         NSLog("KShot 收到截图请求")
         guard !isCapturing else { return }
 
@@ -35,7 +43,7 @@ final class ScreenshotController {
         isCapturing = true
         NSApp.activate(ignoringOtherApps: true)
         overlays = captures.map { screen, image in
-            let window = CaptureWindow(screen: screen, image: image)
+            let window = CaptureWindow(screen: screen, image: image, mode: mode)
             window.captureDidBegin = { [weak self, weak window] in
                 guard let self, let activeWindow = window else { return }
                 self.overlays.filter { $0 !== activeWindow }.forEach { $0.orderOut(nil) }
@@ -52,7 +60,7 @@ final class ScreenshotController {
     private func finish(with result: CaptureResult) {
         guard isCapturing else { return }
         isCapturing = false
-        overlays.forEach { $0.close() }
+        overlays.forEach { $0.orderOut(nil) }
         overlays.removeAll()
 
         if case let .completed(image) = result {
@@ -70,7 +78,6 @@ final class ScreenshotController {
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
             NSSound(named: "Glass")?.play()
-            showOCRResult(text)
         } catch {
             showOCRError(error.localizedDescription)
         }
@@ -101,15 +108,6 @@ final class ScreenshotController {
         alert.runModal()
     }
 
-    private func showOCRResult(_ text: String) {
-        let alert = NSAlert()
-        alert.messageText = "文字识别完成"
-        alert.informativeText = "已识别 \(text.count) 个字符，并复制到剪贴板。"
-        alert.addButton(withTitle: "好")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-    }
-
     private func showOCRError(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -119,6 +117,11 @@ final class ScreenshotController {
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
+}
+
+enum CaptureMode: Equatable {
+    case screenshot
+    case textRecognition
 }
 
 enum CaptureResult {

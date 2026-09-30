@@ -6,8 +6,12 @@ final class HotKeyManager {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private let action: () -> Void
+    private let keyCode: UInt32
+    private let identifierID: UInt32
 
-    init(action: @escaping () -> Void) {
+    init(keyCode: UInt32, identifierID: UInt32, action: @escaping () -> Void) {
+        self.keyCode = keyCode
+        self.identifierID = identifierID
         self.action = action
         installHandler()
         registerHotKey()
@@ -26,9 +30,22 @@ final class HotKeyManager {
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(
             GetApplicationEventTarget(),
-            { _, _, userData in
-                guard let userData else { return noErr }
+            { _, event, userData in
+                guard let event, let userData else { return OSStatus(eventNotHandledErr) }
                 let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                var identifier = EventHotKeyID()
+                let status = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &identifier
+                )
+                guard status == noErr, identifier.id == manager.identifierID else {
+                    return OSStatus(eventNotHandledErr)
+                }
                 DispatchQueue.main.async { manager.action() }
                 return noErr
             },
@@ -40,9 +57,9 @@ final class HotKeyManager {
     }
 
     private func registerHotKey() {
-        let identifier = EventHotKeyID(signature: fourCharCode("KSHT"), id: 1)
+        let identifier = EventHotKeyID(signature: fourCharCode("KSHT"), id: identifierID)
         let status = RegisterEventHotKey(
-            UInt32(kVK_ANSI_A),
+            keyCode,
             UInt32(controlKey | cmdKey),
             identifier,
             GetApplicationEventTarget(),
