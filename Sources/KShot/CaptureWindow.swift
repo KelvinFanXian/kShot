@@ -8,7 +8,7 @@ final class CaptureWindow: NSWindow {
 
     init(screen: NSScreen, image: CGImage) {
         captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image)
-        super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
+        super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         level = .screenSaver
         backgroundColor = .clear
         isOpaque = true
@@ -68,14 +68,14 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        sourceImage.draw(in: bounds, from: .zero, operation: .copy, fraction: 1)
+        drawScreenImage(sourceImage)
         NSColor.black.withAlphaComponent(0.46).setFill()
         bounds.fill()
         guard selection.width >= 1, selection.height >= 1 else { drawHint(); return }
 
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: selection).addClip()
-        sourceImage.draw(in: bounds, from: .zero, operation: .copy, fraction: 1)
+        drawScreenImage(sourceImage)
         drawAnnotations()
         drawDraft()
         NSGraphicsContext.restoreGraphicsState()
@@ -348,7 +348,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             let path = NSBezierPath(); path.move(to: points[0]); points.dropFirst().forEach { path.line(to: $0) }
             path.lineWidth = 20; path.lineCapStyle = .round; path.lineJoinStyle = .round; path.addClip()
             NSGraphicsContext.current?.imageInterpolation = .none
-            pixelatedImage.draw(in: bounds, from: .zero, operation: .copy, fraction: 1)
+            drawScreenImage(pixelatedImage, interpolation: .none)
             NSGraphicsContext.restoreGraphicsState()
         }
     }
@@ -377,10 +377,22 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         context.imageInterpolation = .high
-        sourceImage.draw(in: bounds, from: .zero, operation: .copy, fraction: 1)
+        drawScreenImage(sourceImage)
         drawAnnotations()
         NSGraphicsContext.restoreGraphicsState()
         let result = NSImage(size: selection.size); result.addRepresentation(rep); return result
+    }
+
+    private func drawScreenImage(_ image: NSImage, interpolation: NSImageInterpolation = .high) {
+        NSGraphicsContext.current?.imageInterpolation = interpolation
+        image.draw(
+            in: bounds,
+            from: .zero,
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: true,
+            hints: nil
+        )
     }
 
     private static func makePixelatedImage(from image: CGImage, displaySize: CGSize) -> NSImage {

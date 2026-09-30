@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 final class HotKeyManager {
+    private(set) var isRegistered = false
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private let action: () -> Void
@@ -40,7 +41,7 @@ final class HotKeyManager {
 
     private func registerHotKey() {
         let identifier = EventHotKeyID(signature: fourCharCode("KSHT"), id: 1)
-        RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             UInt32(kVK_ANSI_A),
             UInt32(controlKey | cmdKey),
             identifier,
@@ -48,6 +49,10 @@ final class HotKeyManager {
             0,
             &hotKeyRef
         )
+        isRegistered = status == noErr
+        if status != noErr {
+            NSLog("KShot 注册快捷键失败，OSStatus=%d", status)
+        }
     }
 
     private func fourCharCode(_ value: String) -> FourCharCode {

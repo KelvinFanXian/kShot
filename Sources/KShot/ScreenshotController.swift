@@ -11,6 +11,7 @@ final class ScreenshotController {
     private init() {}
 
     func startCapture() {
+        NSLog("KShot 收到截图请求")
         guard !isCapturing else { return }
 
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
