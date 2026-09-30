@@ -7,11 +7,16 @@ let package = Package(
     products: [
         .executable(name: "KShot", targets: ["KShot"])
     ],
+    dependencies: [
+        .package(path: "Vendor/onnxruntime")
+    ],
     targets: [
         .executableTarget(
             name: "KShot",
-            swiftSettings: [.swiftLanguageMode(.v5)],
-            linkerSettings: [.linkedFramework("Security")]
+            dependencies: [
+                .product(name: "onnxruntime", package: "onnxruntime")
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "KShotTests",

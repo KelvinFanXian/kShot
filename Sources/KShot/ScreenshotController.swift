@@ -65,7 +65,7 @@ final class ScreenshotController {
 
     private func recognizeText(in image: NSImage) async {
         do {
-            let text = try await ZhipuOCRService().recognize(image)
+            let text = try await PaddleOCRService.shared.recognize(image)
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)

@@ -20,6 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyManager = HotKeyManager(keyCode: UInt32(kVK_ANSI_A), identifierID: 1) {
             ScreenshotController.shared.startCapture()
         }
+        Task.detached(priority: .utility) {
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            do {
+                try await PaddleOCRService.shared.prepare()
+                NSLog("PaddleOCR 本地模型已就绪，耗时 %.3f 秒", CFAbsoluteTimeGetCurrent() - startedAt)
+            } catch {
+                NSLog("PaddleOCR 本地模型加载失败：%@", error.localizedDescription)
+            }
+        }
         NSLog("KShot 已启动，快捷键注册状态：%@", hotKeyManager?.isRegistered == true ? "成功" : "失败")
         if CommandLine.arguments.contains("--capture-on-launch") {
             DispatchQueue.main.async {
@@ -44,10 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aboutItem.target = self
         menu.addItem(aboutItem)
 
-        let ocrSettingsItem = NSMenuItem(title: "智谱 OCR 设置…", action: #selector(configureOCR), keyEquivalent: "")
-        ocrSettingsItem.target = self
-        menu.addItem(ocrSettingsItem)
-
         let quitItem = NSMenuItem(title: "退出 KShot", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -62,37 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "KShot",
-            .applicationVersion: "0.2.3",
+            .applicationVersion: "0.3.0",
             .credits: NSAttributedString(string: "作者：范显")
         ])
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc private func configureOCR() {
-        let alert = NSAlert()
-        alert.messageText = "智谱 OCR 设置"
-        alert.informativeText = "Coding Plan Key 仅保存在本机钥匙串中。"
-        alert.addButton(withTitle: "保存")
-        alert.addButton(withTitle: "取消")
-
-        let field = NSSecureTextField(frame: CGRect(x: 0, y: 0, width: 360, height: 24))
-        field.placeholderString = APIKeyStore.shared.load() == nil ? "输入 Coding Plan Key" : "已设置；输入新 Key 可替换"
-        alert.accessoryView = field
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        if APIKeyStore.shared.save(field.stringValue) {
-            let confirmation = NSAlert()
-            confirmation.messageText = "已保存"
-            confirmation.informativeText = "智谱 Coding Plan Key 已安全存入本机钥匙串。"
-            confirmation.runModal()
-        } else {
-            let failure = NSAlert()
-            failure.alertStyle = .warning
-            failure.messageText = "保存失败"
-            failure.informativeText = "请输入有效的 Coding Plan Key 后重试。"
-            failure.runModal()
-        }
     }
 
     @objc private func quit() {

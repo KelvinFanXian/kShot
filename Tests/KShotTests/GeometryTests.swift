@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import KShot
 
 final class GeometryTests: XCTestCase {
@@ -14,15 +15,61 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(rect.point(for: .right), CGPoint(x: 110, y: 50))
     }
 
-    func testOCRResponseRemovesMarkdownFence() {
-        XCTAssertEqual(ZhipuOCRService.cleaned("```text\n第一行\n第二行\n```"), "第一行\n第二行")
-        XCTAssertEqual(ZhipuOCRService.cleaned("  普通文本  "), "普通文本")
+    func testPaddleOCRCTCDecoderRemovesBlankAndDuplicates() throws {
+        let decoder = PaddleOCRDecoder(characters: ["你", "好"])
+        let values: [Float] = [
+            0.1, 0.9, 0.0, 0.0,
+            0.1, 0.8, 0.1, 0.0,
+            0.9, 0.1, 0.0, 0.0,
+            0.1, 0.0, 0.9, 0.0
+        ]
+        XCTAssertEqual(try decoder.decode(values, shape: [1, 4, 4]), "你好")
     }
 
-    func testOCRUsesCodingPlanEndpoint() {
-        XCTAssertEqual(
-            ZhipuOCRService.endpoint.absoluteString,
-            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    @MainActor
+    func testBundledPaddleOCRRecognizesRenderedText() async throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let resources = repository.appendingPathComponent("Resources/PaddleOCR")
+        let service = PaddleOCRService(
+            modelURL: resources.appendingPathComponent("PP-OCRv6_tiny_rec.onnx"),
+            dictionaryURL: resources.appendingPathComponent("character_dict.txt")
         )
+        let englishImage = NSImage(size: NSSize(width: 720, height: 96))
+        englishImage.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: englishImage.size).fill()
+        "KShot 123".draw(
+            at: NSPoint(x: 20, y: 16),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 54, weight: .medium),
+                .foregroundColor: NSColor.black
+            ]
+        )
+        englishImage.unlockFocus()
+
+        let text = try await service.recognize(englishImage)
+        XCTAssertEqual(
+            text.replacingOccurrences(of: " ", with: "").lowercased(),
+            "kshot123"
+        )
+
+        let chineseImage = NSImage(size: NSSize(width: 720, height: 96))
+        chineseImage.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: chineseImage.size).fill()
+        "截图文字 2026".draw(
+            at: NSPoint(x: 20, y: 16),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 54, weight: .medium),
+                .foregroundColor: NSColor.black
+            ]
+        )
+        chineseImage.unlockFocus()
+
+        let chineseText = try await service.recognize(chineseImage)
+        XCTAssertEqual(chineseText.replacingOccurrences(of: " ", with: ""), "截图文字2026")
     }
 }
