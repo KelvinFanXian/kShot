@@ -52,14 +52,34 @@ final class ScreenshotController {
     private func finish(with result: CaptureResult) {
         guard isCapturing else { return }
         isCapturing = false
-        overlays.forEach { $0.orderOut(nil) }
-        overlays.removeAll()
+        disposeOverlays()
 
         if case let .completed(image) = result {
             copyToPasteboard(image)
             NSSound(named: "Tink")?.play()
         } else if case let .recognizeText(image) = result {
             Task { await recognizeText(in: image) }
+        }
+    }
+
+    private func disposeOverlays() {
+        let finishedOverlays = overlays
+        overlays.removeAll(keepingCapacity: false)
+
+        finishedOverlays.forEach { window in
+            window.completion = nil
+            window.captureDidBegin = nil
+            window.orderOut(nil)
+        }
+
+        // CaptureView completes from a mouse/key event. Closing its window in that
+        // same event stack can invalidate AppKit objects still in use, so release
+        // the full-screen buffers on the next main run-loop turn instead.
+        DispatchQueue.main.async {
+            finishedOverlays.forEach { window in
+                window.releaseCaptureContent()
+                window.close()
+            }
         }
     }
 

@@ -1,13 +1,14 @@
 import AppKit
 
 final class CaptureWindow: NSWindow {
-    var completion: ((CaptureResult) -> Void)? { didSet { captureView.completion = completion } }
-    var captureDidBegin: (() -> Void)? { didSet { captureView.captureDidBegin = captureDidBegin } }
+    var completion: ((CaptureResult) -> Void)? { didSet { captureView?.completion = completion } }
+    var captureDidBegin: (() -> Void)? { didSet { captureView?.captureDidBegin = captureDidBegin } }
 
-    private let captureView: CaptureView
+    private var captureView: CaptureView?
 
     init(screen: NSScreen, image: CGImage) {
-        captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image)
+        let captureView = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), image: image)
+        self.captureView = captureView
         super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         isReleasedWhenClosed = false
         level = .screenSaver
@@ -17,6 +18,13 @@ final class CaptureWindow: NSWindow {
         acceptsMouseMovedEvents = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         contentView = captureView
+    }
+
+    func releaseCaptureContent() {
+        completion = nil
+        captureDidBegin = nil
+        contentView = nil
+        captureView = nil
     }
 
     override var canBecomeKey: Bool { true }
