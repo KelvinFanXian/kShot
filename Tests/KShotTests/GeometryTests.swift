@@ -15,6 +15,25 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(rect.point(for: .right), CGPoint(x: 110, y: 50))
     }
 
+    func testAnnotationHistorySupportsUndoRedoAndClearsRedoBranch() {
+        var history = AnnotationHistory()
+        history.append(.rectangle(CGRect(x: 1, y: 2, width: 3, height: 4)))
+        history.append(.arrow(from: .zero, to: CGPoint(x: 10, y: 10)))
+        XCTAssertEqual(history.items.count, 2)
+        XCTAssertTrue(history.canUndo)
+        XCTAssertFalse(history.canRedo)
+
+        XCTAssertTrue(history.undo())
+        XCTAssertEqual(history.items.count, 1)
+        XCTAssertTrue(history.canRedo)
+        XCTAssertTrue(history.redo())
+        XCTAssertEqual(history.items.count, 2)
+
+        XCTAssertTrue(history.undo())
+        history.append(.text("新分支", at: .zero))
+        XCTAssertFalse(history.canRedo)
+    }
+
     func testPaddleOCRCTCDecoderRemovesBlankAndDuplicates() throws {
         let decoder = PaddleOCRDecoder(characters: ["你", "好"])
         let values: [Float] = [

@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "KShot",
-            .applicationVersion: "0.3.0",
+            .applicationVersion: "0.3.1",
             .credits: NSAttributedString(string: "作者：范显")
         ])
         NSApp.activate(ignoringOtherApps: true)

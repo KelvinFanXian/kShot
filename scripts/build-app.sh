@@ -13,6 +13,7 @@ CONTENTS_DIR="$APP_DIR/Contents"
 mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 cp "$ROOT_DIR/.build/release/KShot" "$CONTENTS_DIR/MacOS/KShot"
 cp "$ROOT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$ROOT_DIR/Resources/AppIcon.icns" "$CONTENTS_DIR/Resources/AppIcon.icns"
 rm -rf "$CONTENTS_DIR/Resources/PaddleOCR"
 cp -R "$ROOT_DIR/Resources/PaddleOCR" "$CONTENTS_DIR/Resources/PaddleOCR"
 

@@ -44,9 +44,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var selectedTool: AnnotationTool?
     private var isOCRToolSelected = false
     private var ocrSelection: CGRect = .zero
-    private var annotations: [Annotation] = []
+    private var annotationHistory = AnnotationHistory()
     private var draftMosaic: [CGPoint] = []
     private var textEditor: NSTextField?
+    private var hoveredButtonIndex: Int?
     private var hasAnnouncedCapture = false
     private var isFinishing = false
     private let buttonSize: CGFloat = 34
@@ -69,9 +70,27 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
-        if isOCRToolSelected, !selection.isEmpty {
-            addCursorRect(selection, cursor: .crosshair)
+        addCursorRect(bounds, cursor: selection.isEmpty ? .crosshair : .arrow)
+        guard !selection.isEmpty else { return }
+        let selectionCursor: NSCursor
+        if isOCRToolSelected || selectedTool == .rectangle || selectedTool == .arrow || selectedTool == .mosaic {
+            selectionCursor = .crosshair
+        } else if selectedTool == .text {
+            selectionCursor = .iBeam
+        } else {
+            selectionCursor = .openHand
+        }
+        addCursorRect(selection, cursor: selectionCursor)
+        addCursorRect(toolbarRect, cursor: .pointingHand)
+        for handle in ResizeHandle.allCases {
+            let point = selection.point(for: handle)
+            let rect = CGRect(x: point.x - 7, y: point.y - 7, width: 14, height: 14)
+            switch handle {
+            case .top, .bottom: addCursorRect(rect, cursor: .resizeUpDown)
+            case .left, .right: addCursorRect(rect, cursor: .resizeLeftRight)
+            case .topLeft, .bottomRight: addCursorRect(rect, cursor: diagonalNWSECursor)
+            case .topRight, .bottomLeft: addCursorRect(rect, cursor: diagonalNESWCursor)
+            }
         }
     }
 
@@ -118,9 +137,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
         } else if !selection.isEmpty, selection.contains(point) {
             interaction = .moving(origin: selection)
+            NSCursor.closedHand.set()
         } else {
             commitTextEditor()
-            annotations.removeAll()
+            annotationHistory.removeAll()
             selection = CGRect(origin: point, size: .zero)
             interaction = .selecting
         }
@@ -164,16 +184,28 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .idle: break
         }
         interaction = .idle
+        window?.invalidateCursorRects(for: self)
         needsDisplay = true
         if let recognizedRect { recognizeText(in: recognizedRect) }
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let newIndex = toolbarRect.contains(point) ? buttonIndex(at: point) : nil
+        guard newIndex != hoveredButtonIndex else { return }
+        hoveredButtonIndex = newIndex
+        needsDisplay = true
+    }
+
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 6, event.modifierFlags.contains(.command) {
+            event.modifierFlags.contains(.shift) ? redoAnnotation() : undoAnnotation()
+            return
+        }
         switch event.keyCode {
         case 53: finish(.cancelled)
         case 36, 76: completeCapture()
-        case 51:
-            if !annotations.isEmpty { annotations.removeLast(); needsDisplay = true }
+        case 51, 117: undoAnnotation()
         default: super.keyDown(with: event)
         }
     }
@@ -200,8 +232,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             window?.invalidateCursorRects(for: self)
             needsDisplay = true
         }
+        else if undoButtonRect.contains(point) { undoAnnotation() }
+        else if redoButtonRect.contains(point) { redoAnnotation() }
         else if cancelButtonRect.contains(point) { finish(.cancelled) }
         else if doneButtonRect.contains(point) { completeCapture() }
+    }
+
+    private func undoAnnotation() {
+        commitTextEditor()
+        if annotationHistory.undo() { needsDisplay = true }
+    }
+
+    private func redoAnnotation() {
+        commitTextEditor()
+        if annotationHistory.redo() { needsDisplay = true }
     }
 
     private func completeCapture() {
@@ -231,11 +275,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         switch selectedTool {
         case .rectangle:
             let rect = CGRect(from: dragStart, to: end)
-            if rect.width > 2, rect.height > 2 { annotations.append(.rectangle(rect)) }
+            if rect.width > 2, rect.height > 2 { annotationHistory.append(.rectangle(rect)) }
         case .arrow:
-            if hypot(end.x - dragStart.x, end.y - dragStart.y) > 3 { annotations.append(.arrow(from: dragStart, to: end)) }
+            if hypot(end.x - dragStart.x, end.y - dragStart.y) > 3 { annotationHistory.append(.arrow(from: dragStart, to: end)) }
         case .mosaic:
-            if draftMosaic.count > 1 { annotations.append(.mosaic(draftMosaic)) }
+            if draftMosaic.count > 1 { annotationHistory.append(.mosaic(draftMosaic)) }
             draftMosaic.removeAll()
         case .text, .none: break
         }
@@ -261,7 +305,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func commitTextEditor() {
         guard let editor = textEditor else { return }
         let text = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { annotations.append(.text(text, at: editor.frame.origin)) }
+        if !text.isEmpty { annotationHistory.append(.text(text, at: editor.frame.origin)) }
         editor.removeFromSuperview()
         textEditor = nil
         window?.makeFirstResponder(self)
@@ -335,25 +379,40 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
-        for tool in AnnotationTool.allCases { drawButton(rect: toolButtonRect(tool), symbol: tool.symbolName, selected: tool == selectedTool) }
-        drawButton(rect: ocrButtonRect, symbol: "text.viewfinder", selected: isOCRToolSelected, color: .systemBlue)
-        drawButton(rect: cancelButtonRect, symbol: "xmark", color: .secondaryLabelColor)
-        drawButton(rect: doneButtonRect, symbol: "checkmark", color: .systemGreen)
+        for tool in AnnotationTool.allCases {
+            let index = AnnotationTool.allCases.firstIndex(of: tool) ?? 0
+            drawButton(rect: toolButtonRect(tool), symbol: tool.symbolName, selected: tool == selectedTool, hovered: hoveredButtonIndex == index)
+        }
+        drawButton(rect: ocrButtonRect, symbol: "text.viewfinder", selected: isOCRToolSelected, hovered: hoveredButtonIndex == ocrButtonIndex, color: .systemBlue)
+        drawButton(rect: undoButtonRect, symbol: "arrow.uturn.backward", hovered: hoveredButtonIndex == undoButtonIndex, enabled: annotationHistory.canUndo)
+        drawButton(rect: redoButtonRect, symbol: "arrow.uturn.forward", hovered: hoveredButtonIndex == redoButtonIndex, enabled: annotationHistory.canRedo)
+        drawButton(rect: cancelButtonRect, symbol: "xmark", hovered: hoveredButtonIndex == cancelButtonIndex, color: .secondaryLabelColor)
+        drawButton(rect: doneButtonRect, symbol: "checkmark", hovered: hoveredButtonIndex == doneButtonIndex, color: .systemGreen)
     }
 
-    private func drawButton(rect: CGRect, symbol: String, selected: Bool = false, color: NSColor = .labelColor) {
+    private func drawButton(rect: CGRect, symbol: String, selected: Bool = false, hovered: Bool = false, enabled: Bool = true, color: NSColor = .labelColor) {
         if selected {
             NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+        } else if hovered, enabled {
+            NSColor.labelColor.withAlphaComponent(0.09).setFill()
             NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
         }
         guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) else { return }
         let configured = image.withSymbolConfiguration(.init(pointSize: 15, weight: .medium)) ?? image
-        color.set()
-        configured.draw(in: CGRect(x: rect.midX - 9, y: rect.midY - 9, width: 18, height: 18))
+        (enabled ? color : NSColor.tertiaryLabelColor).set()
+        configured.draw(
+            in: CGRect(x: rect.midX - 9, y: rect.midY - 9, width: 18, height: 18),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: enabled ? 1 : 0.55,
+            respectFlipped: true,
+            hints: nil
+        )
     }
 
     private var toolbarRect: CGRect {
-        let count = CGFloat(AnnotationTool.allCases.count + 3)
+        let count = CGFloat(AnnotationTool.allCases.count + 5)
         let width = toolbarPadding * 2 + count * buttonSize + (count - 1) * buttonSpacing
         var x = min(max(8, selection.maxX - width), bounds.width - width - 8)
         if bounds.width < width + 16 { x = 0 }
@@ -363,14 +422,43 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func toolButtonRect(_ tool: AnnotationTool) -> CGRect { buttonRect(index: AnnotationTool.allCases.firstIndex(of: tool) ?? 0) }
-    private var ocrButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count) }
-    private var cancelButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count + 1) }
-    private var doneButtonRect: CGRect { buttonRect(index: AnnotationTool.allCases.count + 2) }
+    private var ocrButtonIndex: Int { AnnotationTool.allCases.count }
+    private var undoButtonIndex: Int { ocrButtonIndex + 1 }
+    private var redoButtonIndex: Int { ocrButtonIndex + 2 }
+    private var cancelButtonIndex: Int { ocrButtonIndex + 3 }
+    private var doneButtonIndex: Int { ocrButtonIndex + 4 }
+    private var ocrButtonRect: CGRect { buttonRect(index: ocrButtonIndex) }
+    private var undoButtonRect: CGRect { buttonRect(index: undoButtonIndex) }
+    private var redoButtonRect: CGRect { buttonRect(index: redoButtonIndex) }
+    private var cancelButtonRect: CGRect { buttonRect(index: cancelButtonIndex) }
+    private var doneButtonRect: CGRect { buttonRect(index: doneButtonIndex) }
     private func buttonRect(index: Int) -> CGRect {
         CGRect(x: toolbarRect.minX + toolbarPadding + CGFloat(index) * (buttonSize + buttonSpacing), y: toolbarRect.minY + toolbarPadding, width: buttonSize, height: buttonSize)
     }
 
-    private func drawAnnotations() { annotations.forEach(drawAnnotation) }
+    private func buttonIndex(at point: CGPoint) -> Int? {
+        let count = AnnotationTool.allCases.count + 5
+        return (0..<count).first { buttonRect(index: $0).contains(point) }
+    }
+
+    private var diagonalNWSECursor: NSCursor {
+        makeCursor(symbol: "arrow.up.left.and.arrow.down.right")
+    }
+
+    private var diagonalNESWCursor: NSCursor {
+        makeCursor(symbol: "arrow.up.right.and.arrow.down.left")
+    }
+
+    private func makeCursor(symbol name: String) -> NSCursor {
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return .crosshair }
+        let canvas = NSImage(size: NSSize(width: 22, height: 22))
+        canvas.lockFocus()
+        symbol.draw(in: NSRect(x: 2, y: 2, width: 18, height: 18))
+        canvas.unlockFocus()
+        return NSCursor(image: canvas, hotSpot: NSPoint(x: 11, y: 11))
+    }
+
+    private func drawAnnotations() { annotationHistory.items.forEach(drawAnnotation) }
 
     private func drawDraft() {
         guard case .drawing = interaction else { return }

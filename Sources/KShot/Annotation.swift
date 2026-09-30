@@ -32,6 +32,38 @@ enum Annotation {
     case mosaic([CGPoint])
 }
 
+struct AnnotationHistory {
+    private(set) var items: [Annotation] = []
+    private(set) var redoItems: [Annotation] = []
+
+    var canUndo: Bool { !items.isEmpty }
+    var canRedo: Bool { !redoItems.isEmpty }
+
+    mutating func append(_ annotation: Annotation) {
+        items.append(annotation)
+        redoItems.removeAll()
+    }
+
+    @discardableResult
+    mutating func undo() -> Bool {
+        guard let annotation = items.popLast() else { return false }
+        redoItems.append(annotation)
+        return true
+    }
+
+    @discardableResult
+    mutating func redo() -> Bool {
+        guard let annotation = redoItems.popLast() else { return false }
+        items.append(annotation)
+        return true
+    }
+
+    mutating func removeAll() {
+        items.removeAll()
+        redoItems.removeAll()
+    }
+}
+
 enum ResizeHandle: CaseIterable {
     case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
 }
