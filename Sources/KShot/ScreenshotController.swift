@@ -77,8 +77,7 @@ final class ScreenshotController {
         // the full-screen buffers on the next main run-loop turn instead.
         DispatchQueue.main.async {
             finishedOverlays.forEach { window in
-                window.releaseCaptureContent()
-                window.close()
+                window.closeAndReleaseCaptureContent()
             }
         }
     }
@@ -96,9 +95,20 @@ final class ScreenshotController {
     }
 
     private func copyToPasteboard(_ image: NSImage) {
+        let pngData: Data? = autoreleasepool {
+            image.representations
+                .compactMap { $0 as? NSBitmapImageRep }
+                .first?
+                .representation(using: .png, properties: [:])
+        }
+        guard let pngData else {
+            showCaptureError()
+            return
+        }
+
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([image])
+        pasteboard.setData(pngData, forType: .png)
     }
 
     private func showPermissionAlert() {

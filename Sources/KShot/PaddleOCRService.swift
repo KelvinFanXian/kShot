@@ -34,12 +34,9 @@ actor PaddleOCRService {
         dictionaryURLOverride = dictionaryURL
     }
 
-    func prepare() throws {
-        _ = try loadedSession()
-    }
-
     func recognize(_ image: NSImage) throws -> String {
         let session = try loadedSession()
+        defer { unloadSession() }
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw PaddleOCRError.invalidImage
         }
@@ -72,6 +69,14 @@ actor PaddleOCRService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { throw PaddleOCRError.noText }
         return result
+    }
+
+    private func unloadSession() {
+        session = nil
+        environment = nil
+        inputName = ""
+        outputNames.removeAll(keepingCapacity: false)
+        decoder = nil
     }
 
     private func loadedSession() throws -> ORTSession {

@@ -20,11 +20,14 @@ final class CaptureWindow: NSWindow {
         contentView = captureView
     }
 
-    func releaseCaptureContent() {
+    func closeAndReleaseCaptureContent() {
         completion = nil
         captureDidBegin = nil
         contentView = nil
         captureView = nil
+        _ = Unmanaged.passRetained(self)
+        isReleasedWhenClosed = true
+        close()
     }
 
     override var canBecomeKey: Bool { true }
@@ -63,7 +66,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private let toolbarPadding: CGFloat = 7
 
     init(frame: CGRect, image: CGImage) {
-        sourceImage = NSImage(cgImage: image, size: frame.size)
+        let sourceImage = NSImage(cgImage: image, size: frame.size)
+        sourceImage.cacheMode = .never
+        self.sourceImage = sourceImage
         pixelatedImage = CaptureView.makePixelatedImage(from: image, displaySize: frame.size)
         super.init(frame: frame)
         wantsLayer = true
@@ -539,24 +544,29 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func render(rect: CGRect, includeAnnotations: Bool) -> NSImage? {
-        let scaleX = CGFloat(sourceImage.representations.first?.pixelsWide ?? Int(bounds.width)) / bounds.width
-        let scaleY = CGFloat(sourceImage.representations.first?.pixelsHigh ?? Int(bounds.height)) / bounds.height
-        let pixelWidth = max(1, Int((rect.width * scaleX).rounded())), pixelHeight = max(1, Int((rect.height * scaleY).rounded()))
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixelWidth, pixelsHigh: pixelHeight, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-              let bitmapData = rep.bitmapData,
-              let cgContext = CGContext(data: bitmapData, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: rep.bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        rep.size = rect.size
-        cgContext.translateBy(x: 0, y: CGFloat(pixelHeight))
-        cgContext.scaleBy(x: scaleX, y: -scaleY)
-        cgContext.translateBy(x: -rect.minX, y: -rect.minY)
-        let context = NSGraphicsContext(cgContext: cgContext, flipped: true)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        context.imageInterpolation = .high
-        drawScreenImage(sourceImage)
-        if includeAnnotations { drawAnnotations() }
-        NSGraphicsContext.restoreGraphicsState()
-        let result = NSImage(size: rect.size); result.addRepresentation(rep); return result
+        autoreleasepool {
+            let scaleX = CGFloat(sourceImage.representations.first?.pixelsWide ?? Int(bounds.width)) / bounds.width
+            let scaleY = CGFloat(sourceImage.representations.first?.pixelsHigh ?? Int(bounds.height)) / bounds.height
+            let pixelWidth = max(1, Int((rect.width * scaleX).rounded())), pixelHeight = max(1, Int((rect.height * scaleY).rounded()))
+            guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixelWidth, pixelsHigh: pixelHeight, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let bitmapData = rep.bitmapData,
+                  let cgContext = CGContext(data: bitmapData, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: rep.bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            rep.size = rect.size
+            cgContext.translateBy(x: 0, y: CGFloat(pixelHeight))
+            cgContext.scaleBy(x: scaleX, y: -scaleY)
+            cgContext.translateBy(x: -rect.minX, y: -rect.minY)
+            let context = NSGraphicsContext(cgContext: cgContext, flipped: true)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.imageInterpolation = .high
+            drawScreenImage(sourceImage)
+            if includeAnnotations { drawAnnotations() }
+            NSGraphicsContext.restoreGraphicsState()
+            let result = NSImage(size: rect.size)
+            result.cacheMode = .never
+            result.addRepresentation(rep)
+            return result
+        }
     }
 
     private func drawScreenImage(_ image: NSImage, interpolation: NSImageInterpolation = .high) {
@@ -576,7 +586,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return NSImage(cgImage: image, size: displaySize) }
         context.interpolationQuality = .none
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let small = context.makeImage() else { return NSImage(cgImage: image, size: displaySize) }
-        return NSImage(cgImage: small, size: displaySize)
+        let result: NSImage
+        if let small = context.makeImage() {
+            result = NSImage(cgImage: small, size: displaySize)
+        } else {
+            result = NSImage(cgImage: image, size: displaySize)
+        }
+        result.cacheMode = .never
+        return result
     }
 }

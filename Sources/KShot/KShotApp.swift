@@ -20,15 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyManager = HotKeyManager(keyCode: UInt32(kVK_ANSI_A), identifierID: 1) {
             ScreenshotController.shared.startCapture()
         }
-        Task.detached(priority: .utility) {
-            let startedAt = CFAbsoluteTimeGetCurrent()
-            do {
-                try await PaddleOCRService.shared.prepare()
-                NSLog("PaddleOCR 本地模型已就绪，耗时 %.3f 秒", CFAbsoluteTimeGetCurrent() - startedAt)
-            } catch {
-                NSLog("PaddleOCR 本地模型加载失败：%@", error.localizedDescription)
-            }
-        }
         NSLog("KShot 已启动，快捷键注册状态：%@", hotKeyManager?.isRegistered == true ? "成功" : "失败")
         if CommandLine.arguments.contains("--capture-on-launch") {
             DispatchQueue.main.async {
